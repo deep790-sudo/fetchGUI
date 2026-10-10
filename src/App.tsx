@@ -1,0 +1,300 @@
+import { useMemo, useState } from 'react'
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  Clipboard,
+  Code2,
+  Download,
+  Eye,
+  FileCode2,
+  Github,
+  Layers3,
+  Monitor,
+  Palette,
+  RotateCcw,
+  Terminal,
+  WandSparkles,
+} from 'lucide-react'
+
+type ModuleInfo = {
+  id: string
+  label: string
+  detail: string
+  key: string
+  value: string
+  group: 'System' | 'Hardware' | 'Session'
+}
+
+const moduleCatalog: ModuleInfo[] = [
+  { id: 'os', label: 'Operating system', detail: 'Distro and architecture', key: 'OS', value: 'CachyOS Linux x86_64', group: 'System' },
+  { id: 'host', label: 'Host', detail: 'Device model', key: 'Host', value: 'Laptop model', group: 'System' },
+  { id: 'kernel', label: 'Kernel', detail: 'Running kernel version', key: 'Kernel', value: 'Linux 6.x.x-cachyos', group: 'System' },
+  { id: 'uptime', label: 'Uptime', detail: 'Time since boot', key: 'Uptime', value: '2 hours, 13 mins', group: 'System' },
+  { id: 'packages', label: 'Packages', detail: 'Installed package count', key: 'Packages', value: '1,248 (pacman)', group: 'System' },
+  { id: 'shell', label: 'Shell', detail: 'Your command-line shell', key: 'Shell', value: 'fish 4.x', group: 'Session' },
+  { id: 'display', label: 'Display', detail: 'Resolution and refresh rate', key: 'Display', value: '1920x1080 @ 180 Hz', group: 'Hardware' },
+  { id: 'de', label: 'Desktop environment', detail: 'Desktop session', key: 'DE', value: 'KDE Plasma', group: 'Session' },
+  { id: 'wm', label: 'Window manager', detail: 'Compositor or WM', key: 'WM', value: 'Hyprland', group: 'Session' },
+  { id: 'terminal', label: 'Terminal', detail: 'Terminal emulator', key: 'Terminal', value: 'kitty', group: 'Session' },
+  { id: 'cpu', label: 'CPU', detail: 'Processor model and speed', key: 'CPU', value: 'AMD Ryzen 7 7735HS', group: 'Hardware' },
+  { id: 'gpu', label: 'GPU', detail: 'Graphics processor', key: 'GPU', value: 'AMD Radeon 680M', group: 'Hardware' },
+  { id: 'memory', label: 'Memory', detail: 'RAM usage', key: 'Memory', value: '5.42 GiB / 15.05 GiB', group: 'Hardware' },
+  { id: 'disk', label: 'Disk', detail: 'Storage usage', key: 'Disk', value: '321 GiB / 953 GiB (34%)', group: 'Hardware' },
+  { id: 'battery', label: 'Battery', detail: 'Battery status and charge', key: 'Battery', value: '87% [Discharging]', group: 'Hardware' },
+  { id: 'colors', label: 'Color palette', detail: 'Terminal colors swatches', key: '', value: '', group: 'Session' },
+]
+
+const presets = {
+  balanced: {
+    label: 'Balanced',
+    description: 'A little bit of everything',
+    modules: ['title', 'separator', 'os', 'host', 'kernel', 'uptime', 'packages', 'shell', 'de', 'wm', 'cpu', 'gpu', 'memory', 'disk', 'colors'],
+    color: 'cyan',
+  },
+  minimal: {
+    label: 'Minimal',
+    description: 'The essentials, no clutter',
+    modules: ['title', 'separator', 'os', 'kernel', 'cpu', 'memory'],
+    color: 'green',
+  },
+  classic: {
+    label: 'Classic',
+    description: 'The familiar full system rundown',
+    modules: ['title', 'separator', 'os', 'host', 'kernel', 'uptime', 'packages', 'shell', 'display', 'de', 'wm', 'terminal', 'cpu', 'gpu', 'memory', 'disk', 'battery', 'colors'],
+    color: 'blue',
+  },
+}
+
+type PresetKey = keyof typeof presets
+const colors = ['blue', 'cyan', 'green', 'yellow', 'red', 'magenta', 'white']
+const cssColors: Record<string, string> = {
+  blue: '#7aa2f7', cyan: '#7dcfff', green: '#9ece6a', yellow: '#e0af68',
+  red: '#f7768e', magenta: '#bb9af7', white: '#e5e9f0',
+}
+const logoArt = ['       /\\', '      /  \\', '     /    \\', '    /  /\\  \\', '   /  /  \\  \\', '  /__/____\\__\\', '    /  /\\  \\', '   /__/  \\__\\']
+const sampleById = Object.fromEntries(moduleCatalog.map((item) => [item.id, item])) as Record<string, ModuleInfo>
+
+function App() {
+  const [enabledModules, setEnabledModules] = useState<string[]>(presets.balanced.modules)
+  const [keyColor, setKeyColor] = useState(presets.balanced.color)
+  const [separator, setSeparator] = useState(': ')
+  const [keyWidth, setKeyWidth] = useState(12)
+  const [logoEnabled, setLogoEnabled] = useState(true)
+  const [logoSource, setLogoSource] = useState('cachyos')
+  const [activePreset, setActivePreset] = useState<PresetKey>('balanced')
+  const [copied, setCopied] = useState(false)
+  const [showConfig, setShowConfig] = useState(true)
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ System: true, Hardware: true, Session: true })
+
+  const configText = useMemo(() => {
+    const config = {
+      $schema: 'https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json',
+      logo: logoEnabled ? (logoSource === 'auto' ? { type: 'auto', padding: { right: 2 } } : { type: 'builtin', source: logoSource.trim() || 'cachyos', padding: { right: 2 } }) : null,
+      display: {
+        separator,
+        color: { keys: keyColor },
+        key: { width: keyWidth },
+      },
+      modules: enabledModules,
+    }
+    return `// Generated by FetchLab · edit freely, then save as config.jsonc\n${JSON.stringify(config, null, 2)}\n`
+  }, [enabledModules, keyColor, separator, keyWidth, logoEnabled, logoSource])
+
+  const toggleModule = (id: string) => {
+    setEnabledModules((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  const moveModule = (id: string, direction: -1 | 1) => {
+    setEnabledModules((current) => {
+      const index = current.indexOf(id)
+      const nextIndex = index + direction
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[nextIndex]] = [next[nextIndex], next[index]]
+      return next
+    })
+  }
+
+  const applyPreset = (key: PresetKey) => {
+    setActivePreset(key)
+    setEnabledModules([...presets[key].modules])
+    setKeyColor(presets[key].color)
+  }
+
+  const resetAll = () => {
+    setEnabledModules([...presets.balanced.modules])
+    setKeyColor(presets.balanced.color)
+    setSeparator(': ')
+    setKeyWidth(12)
+    setLogoEnabled(true)
+    setLogoSource('cachyos')
+    setActivePreset('balanced')
+  }
+
+  const downloadConfig = () => {
+    const blob = new Blob([configText], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'config.jsonc'
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const copyConfig = async () => {
+    try {
+      await navigator.clipboard.writeText(configText)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      const blob = new Blob([configText], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'config.jsonc'
+      anchor.click()
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  const visibleGroups: ModuleInfo['group'][] = ['System', 'Hardware', 'Session']
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-lockup">
+          <div className="brand-mark"><Terminal size={20} strokeWidth={2.2} /></div>
+          <div><div className="brand-name">fetch<span>lab</span></div><div className="brand-caption">FASTFETCH STUDIO</div></div>
+        </div>
+        <div className="sidebar-rule" />
+        <div className="nav-label">WORKSPACE</div>
+        <button className="nav-item active"><Layers3 size={17} /><span>Config builder</span><span className="nav-dot" /></button>
+        <button className="nav-item" onClick={() => document.getElementById('presets')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><WandSparkles size={17} /><span>Presets</span></button>
+        <a className="nav-item nav-link" href="https://github.com/fastfetch-cli/fastfetch/wiki/Configuration" target="_blank" rel="noreferrer"><CircleHelp size={17} /><span>Fastfetch docs</span></a>
+        <div className="sidebar-bottom">
+          <div className="sidebar-note-icon"><Code2 size={16} /></div>
+          <div className="sidebar-note-title">Made for your terminal.</div>
+          <p>Build it here. Run it anywhere.</p>
+          <a href="https://github.com/fastfetch-cli/fastfetch" target="_blank" rel="noreferrer" className="github-link"><Github size={14} /> Fastfetch on GitHub <span>↗</span></a>
+          <div className="version-line"><span className="status-dot" /> MVP preview <span>v0.1.0</span></div>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="topbar">
+          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>Config builder</strong></div>
+          <div className="topbar-actions">
+            <span className="save-status"><span className="status-dot" /> All changes local</span>
+            <button className="button button-quiet" onClick={resetAll}><RotateCcw size={15} /> Reset</button>
+            <button className="button button-primary" onClick={downloadConfig}><Download size={16} /> Export config</button>
+          </div>
+        </header>
+
+        <section className="page-heading">
+          <div>
+            <div className="eyebrow"><span className="eyebrow-line" /> THE CONFIG PLAYGROUND</div>
+            <h1>Your system.<br className="mobile-break" /> <span>Your style.</span></h1>
+            <p className="heading-description">Build a Fastfetch setup that feels like yours. Tweak the details and watch the preview respond.</p>
+          </div>
+          <div className="heading-orbit" aria-hidden="true"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core"><Terminal size={29} /></div><span className="orbit-star star-one">✳</span><span className="orbit-star star-two">·</span></div>
+        </section>
+
+        <div className="workspace-grid">
+          <section className="panel builder-panel">
+            <div className="panel-heading">
+              <div className="panel-title-group"><div className="panel-icon"><Palette size={17} /></div><div><h2>Customize</h2><p>Fine-tune the output</p></div></div>
+              <span className="control-count">{enabledModules.length} modules</span>
+            </div>
+
+            <div className="control-section">
+              <div className="section-heading"><span className="section-number">01</span><div><h3>Logo & identity</h3><p>Give your terminal a signature</p></div></div>
+              <div className="setting-row logo-row">
+                <div className="setting-copy"><span className="setting-label">Show logo</span><span className="setting-hint">Built-in distro artwork</span></div>
+                <button className={`toggle ${logoEnabled ? 'on' : ''}`} role="switch" aria-checked={logoEnabled} aria-label="Show logo" onClick={() => setLogoEnabled((value) => !value)}><span /></button>
+              </div>
+              <label className={`field-label ${!logoEnabled ? 'is-disabled' : ''}`} htmlFor="logo-source">Logo source</label>
+              <div className="select-wrap"><select id="logo-source" value={logoSource} onChange={(event) => setLogoSource(event.target.value)} disabled={!logoEnabled}><option value="cachyos">CachyOS</option><option value="arch">Arch Linux</option><option value="auto">Auto detect</option><option value="nixos">NixOS</option><option value="ubuntu">Ubuntu</option><option value="fedora">Fedora</option><option value="debian">Debian</option></select><ChevronDown size={15} /></div>
+            </div>
+
+            <div className="control-section">
+              <div className="section-heading"><span className="section-number">02</span><div><h3>Display & color</h3><p>Dial in the small details</p></div></div>
+              <div className="setting-row"><div className="setting-copy"><span className="setting-label">Key color</span><span className="setting-hint">Labels beside each value</span></div><div className="color-options" role="group" aria-label="Key color">{colors.map((color) => <button key={color} className={`color-swatch ${keyColor === color ? 'selected' : ''}`} style={{ '--swatch': cssColors[color] } as React.CSSProperties} title={color} aria-label={`${color} key color`} aria-pressed={keyColor === color} onClick={() => setKeyColor(color)}>{keyColor === color && <Check size={12} />}</button>)}</div></div>
+              <div className="two-fields"><div><label className="field-label" htmlFor="separator">Value separator</label><input id="separator" maxLength={6} value={separator} onChange={(event) => setSeparator(event.target.value)} placeholder=": " /></div><div><label className="field-label" htmlFor="key-width">Key width <span>{keyWidth} ch</span></label><input id="key-width" type="range" min="8" max="20" value={keyWidth} onChange={(event) => setKeyWidth(Number(event.target.value))} /></div></div>
+            </div>
+
+            <div className="control-section module-section">
+              <div className="section-heading module-section-heading"><span className="section-number">03</span><div><h3>System modules</h3><p>Choose what makes the cut</p></div></div>
+              {visibleGroups.map((group) => {
+                const groupItems = moduleCatalog.filter((item) => item.group === group)
+                const isExpanded = expandedGroups[group]
+                const enabledCount = groupItems.filter((item) => enabledModules.includes(item.id)).length
+                return <div className="module-group" key={group}>
+                  <button className="group-heading" onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !current[group] }))} aria-expanded={isExpanded}><span>{group}</span><span className="group-count">{enabledCount}/{groupItems.length}</span><ChevronDown size={14} className={isExpanded ? 'chevron-open' : ''} /></button>
+                  {isExpanded && <div className="module-list">{groupItems.map((item) => {
+                    const active = enabledModules.includes(item.id)
+                    const orderIndex = enabledModules.indexOf(item.id)
+                    return <div className={`module-item ${active ? 'module-active' : ''}`} key={item.id}>
+                      <button className={`module-switch ${active ? 'checked' : ''}`} aria-label={`${active ? 'Disable' : 'Enable'} ${item.label}`} aria-pressed={active} onClick={() => toggleModule(item.id)}>{active && <Check size={11} strokeWidth={3} />}</button>
+                      <div className="module-copy"><span>{item.label}</span><small>{item.detail}</small></div>
+                      {active && <div className="order-controls"><button disabled={orderIndex === 0} aria-label={`Move ${item.label} up`} onClick={() => moveModule(item.id, -1)}><ArrowUp size={12} /></button><button disabled={orderIndex === enabledModules.length - 1} aria-label={`Move ${item.label} down`} onClick={() => moveModule(item.id, 1)}><ArrowDown size={12} /></button></div>}
+                    </div>
+                  })}</div>}
+                </div>
+              })}
+              <div className="module-footer"><span>{enabledModules.length} selected</span><button onClick={() => setEnabledModules([])}>Clear all</button></div>
+            </div>
+          </section>
+
+          <div className="right-column">
+            <section className="panel preview-panel">
+              <div className="panel-heading preview-heading">
+                <div className="panel-title-group"><div className="panel-icon preview-icon"><Eye size={17} /></div><div><h2>Live preview</h2><p>Your output, taking shape</p></div></div>
+                <span className="live-pill"><span /> LIVE</span>
+              </div>
+              <div className="terminal-window">
+                <div className="terminal-titlebar"><div className="window-dots"><i /><i /><i /></div><div className="terminal-tab"><Terminal size={12} /> fetchlab <span>—</span> fish</div><div className="terminal-menu">•••</div></div>
+                <div className="terminal-body">
+                  {logoEnabled && <pre className="logo-art" style={{ color: cssColors[keyColor] }}>{logoArt.join('\n')}</pre>}
+                  <div className={`terminal-output ${!logoEnabled ? 'no-logo' : ''}`}>
+                    {enabledModules.length === 0 && <div className="empty-preview">Nothing to show yet.<br /><span>Enable a module to bring this terminal to life.</span></div>}
+                    {enabledModules.map((id, index) => {
+                      if (id === 'title') return <div key={`${id}-${index}`} className="terminal-title-output"><span className="terminal-user">chase</span><span className="terminal-at">@</span><span className="terminal-host">cachyos</span></div>
+                      if (id === 'separator') return <div key={`${id}-${index}`} className="terminal-separator"><span /></div>
+                      if (id === 'colors') return <div key={`${id}-${index}`} className="terminal-colors">{['#15161e', '#f7768e', '#9ece6a', '#e0af68', '#7aa2f7', '#bb9af7', '#7dcfff', '#a9b1d6', '#414868', '#ff899d', '#b9f27c', '#ff9e64', '#8db0ff', '#c7a9ff', '#89ddff', '#c0caf5'].map((color, i) => <span key={`${color}-${i}`} style={{ background: color }} />)}</div>
+                      const item = sampleById[id]
+                      if (!item) return null
+                      return <div className="terminal-line" key={`${id}-${index}`}><span className="terminal-key" style={{ color: cssColors[keyColor], minWidth: `${keyWidth}ch` }}>{item.key}</span><span className="terminal-separator-text">{separator}</span><span className="terminal-value">{item.value}</span></div>
+                    })}
+                  </div>
+                </div>
+                <div className="terminal-foot"><span><span className="status-dot" /> Sample system data</span><span>UTF-8 <span className="terminal-foot-divider">/</span>  config preview</span></div>
+              </div>
+              <div className="preview-note"><Monitor size={14} /><span>Preview is illustrative. Your actual values appear when you run Fastfetch.</span></div>
+            </section>
+
+            <section className="panel config-panel">
+              <div className="panel-heading config-heading">
+                <div className="panel-title-group"><div className="panel-icon code-icon"><FileCode2 size={17} /></div><div><h2>Generated config</h2><p>Ready for <code>~/.config/fastfetch/</code></p></div></div>
+                <div className="config-actions"><button className="icon-button" title={showConfig ? 'Collapse config' : 'Expand config'} aria-label={showConfig ? 'Collapse config' : 'Expand config'} onClick={() => setShowConfig((value) => !value)}><ChevronDown className={showConfig ? 'chevron-open' : ''} size={16} /></button><button className="button button-copy" onClick={copyConfig}>{copied ? <Check size={14} /> : <Clipboard size={14} />}{copied ? 'Copied' : 'Copy code'}</button></div>
+              </div>
+              {showConfig && <div className="code-window"><div className="code-gutter">{configText.split('\n').slice(0, 50).map((_, i) => <span key={i}>{String(i + 1).padStart(2, '0')}</span>)}</div><pre className="code-content"><code>{configText}</code></pre></div>}
+              <div className="config-footer"><span><span className="status-dot" /> JSONC format</span><button onClick={downloadConfig}><Download size={13} /> Download config.jsonc</button></div>
+            </section>
+
+            <section className="preset-panel" id="presets">
+              <div className="preset-heading"><div><span className="eyebrow preset-eyebrow">QUICK START</span><h2>Pick a starting point</h2></div><span className="preset-caption">Change it all afterward.</span></div>
+              <div className="preset-grid">{(Object.keys(presets) as PresetKey[]).map((key, index) => <button key={key} className={`preset-card ${activePreset === key ? 'preset-selected' : ''}`} onClick={() => applyPreset(key)}><div className={`preset-art preset-art-${key}`} aria-hidden="true">{index === 0 ? <><span>OS</span><span>CPU</span><span>MEM</span><span>GPU</span></> : index === 1 ? <><span>OS</span><span>CPU</span><span>MEM</span></> : <><span>OS</span><span>HOST</span><span>KERNEL</span><span>CPU</span><span>GPU</span><span>MEM</span></>}</div><div className="preset-card-copy"><span className="preset-name">{presets[key].label}{activePreset === key && <Check size={12} />}</span><small>{presets[key].description}</small></div></button>)}</div>
+            </section>
+            <footer className="page-footer"><span>FetchLab <span>·</span> An open-source-minded side project</span><span>Built for terminal people <span>♥</span></span></footer>
+          </div>
+        </div>
+      </main>
+      <button className="mobile-help" onClick={() => window.open('https://github.com/fastfetch-cli/fastfetch/wiki/Configuration', '_blank', 'noopener,noreferrer')} aria-label="Open Fastfetch configuration docs"><CircleHelp size={18} /></button>
+    </div>
+  )
+}
+
+export default App
