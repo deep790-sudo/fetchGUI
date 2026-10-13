@@ -9,6 +9,8 @@ A browser-based visual editor for creating and exporting Fastfetch configuration
 - Choose a built-in logo source, key color, separator, and key width
 - buit-in presets templates: Balanced, Minimal, and Classic
 - Generate Fastfetch JSONC. copy it or download `config.jsonc`
+- Import an existing `config.jsonc` to edit it in the builder
+  - Import support is limited to the modules and settings currently available in FetchGUI.
 
 > The terminal preview uses sample values. It does not inspect the computer running the browser. The generated configuration should be tested with your installed Fastfetch version before replacing an existing config.
 
@@ -39,8 +41,8 @@ If it behaves as expected, back up your existing config and then copy it into `~
 
 ## Upcoming Goals
 
-- Import an existing `config.jsonc`  into the editor
-- Per-module options and custom labels / format strings
+- Add per-module controls for options, custom labels, and format strings
+- Expand config import support to preserve custom modules and settings
 - User-defined ASCII art and local image logos
 - More color schemes and per-module color pickers
 - Validation against Fastfetch's JSON schema
