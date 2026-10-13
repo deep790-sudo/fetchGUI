@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -6,7 +6,6 @@ import {
   ChevronDown,
   CircleHelp,
   Clipboard,
-  Code2,
   Download,
   Eye,
   FileCode2,
@@ -16,6 +15,7 @@ import {
   Palette,
   RotateCcw,
   Terminal,
+  Upload,
   WandSparkles,
 } from 'lucide-react'
 
@@ -69,6 +69,154 @@ const presets = {
 }
 
 type PresetKey = keyof typeof presets
+type ImportFeedback = {
+  type: 'success' | 'warning' | 'error'
+  message: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseJsonc(source: string): unknown {
+  const input = source.replace(/^\uFEFF/, '')
+  let withoutComments = ''
+  let inString = false
+  let escaped = false
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index]
+    const next = input[index + 1]
+
+    if (inString) {
+      withoutComments += char
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+
+    if (inLineComment) {
+      if (char === '\n' || char === '\r') {
+        withoutComments += char
+        inLineComment = false
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      if (char === '*' && next === '/') {
+        inBlockComment = false
+        index += 1
+      } else if (char === '\n' || char === '\r') {
+        withoutComments += char
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      withoutComments += char
+    } else if (char === '/' && next === '/') {
+      inLineComment = true
+      index += 1
+    } else if (char === '/' && next === '*') {
+      inBlockComment = true
+      index += 1
+    } else {
+      withoutComments += char
+    }
+  }
+
+  if (inBlockComment) {
+    throw new Error('The file contains an unfinished block comment.')
+  }
+
+  let cleaned = ''
+  inString = false
+  escaped = false
+
+  for (let index = 0; index < withoutComments.length; index += 1) {
+    const char = withoutComments[index]
+
+    if (inString) {
+      cleaned += char
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      cleaned += char
+    } else if (char === ',') {
+      let nextIndex = index + 1
+      while (nextIndex < withoutComments.length && /\s/.test(withoutComments[nextIndex])) {
+        nextIndex += 1
+      }
+      if (withoutComments[nextIndex] !== '}' && withoutComments[nextIndex] !== ']') {
+        cleaned += char
+      }
+    } else {
+      cleaned += char
+    }
+  }
+
+  return JSON.parse(cleaned) as unknown
+}
+
+const moduleAliases: Record<string, string> = {
+  title: 'title',
+  separator: 'separator',
+  os: 'os',
+  operatingsystem: 'os',
+  host: 'host',
+  kernel: 'kernel',
+  uptime: 'uptime',
+  package: 'packages',
+  packages: 'packages',
+  shell: 'shell',
+  display: 'display',
+  de: 'de',
+  desktopenvironment: 'de',
+  wm: 'wm',
+  windowmanager: 'wm',
+  terminal: 'terminal',
+  cpu: 'cpu',
+  gpu: 'gpu',
+  memory: 'memory',
+  ram: 'memory',
+  disk: 'disk',
+  battery: 'battery',
+  color: 'colors',
+  colors: 'colors',
+}
+
+function getModuleId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, '')
+  return moduleAliases[normalized] ?? null
+}
+
+function getLogoSource(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, '')
+  const aliases: Record<string, string> = {
+    auto: 'auto',
+    autodetect: 'auto',
+    cachyos: 'cachyos',
+    arch: 'arch',
+    archlinux: 'arch',
+    nixos: 'nixos',
+    ubuntu: 'ubuntu',
+    fedora: 'fedora',
+    debian: 'debian',
+  }
+  return aliases[normalized] ?? null
+}
 const colors = ['blue', 'cyan', 'green', 'yellow', 'red', 'magenta', 'white']
 const cssColors: Record<string, string> = {
   blue: '#7aa2f7', cyan: '#7dcfff', green: '#9ece6a', yellow: '#e0af68',
@@ -84,9 +232,11 @@ function App() {
   const [keyWidth, setKeyWidth] = useState(12)
   const [logoEnabled, setLogoEnabled] = useState(true)
   const [logoSource, setLogoSource] = useState('cachyos')
-  const [activePreset, setActivePreset] = useState<PresetKey>('balanced')
+  const [activePreset, setActivePreset] = useState<PresetKey | null>('balanced')
   const [copied, setCopied] = useState(false)
   const [showConfig, setShowConfig] = useState(true)
+  const importInputRef = useRef<HTMLInputElement>(null)
+  const [importFeedback, setImportFeedback] = useState<ImportFeedback | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ System: true, Hardware: true, Session: true })
 
   const configText = useMemo(() => {
@@ -100,7 +250,7 @@ function App() {
       },
       modules: enabledModules,
     }
-    return `// Generated by FetchLab · edit freely, then save as config.jsonc\n${JSON.stringify(config, null, 2)}\n`
+    return `// Generated by FetchGUI · save as config.jsonc\n${JSON.stringify(config, null, 2)}\n`
   }, [enabledModules, keyColor, separator, keyWidth, logoEnabled, logoSource])
 
   const toggleModule = (id: string) => {
@@ -160,6 +310,188 @@ function App() {
     }
   }
 
+
+  const handleConfigImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    if (!file) return
+
+    try {
+      const parsed = parseJsonc(await file.text())
+      if (!isRecord(parsed)) {
+        throw new Error('The file must contain a JSON object at its root.')
+      }
+
+      const warnings: string[] = []
+      const warn = (message: string) => {
+        if (!warnings.includes(message)) warnings.push(message)
+      }
+      const supportedTopLevelKeys = new Set(['$schema', 'logo', 'display', 'modules'])
+      const unsupportedTopLevelKeys = Object.keys(parsed).filter((key) => !supportedTopLevelKeys.has(key))
+      if (unsupportedTopLevelKeys.length > 0) {
+        warn(`Other top-level settings won't be preserved: ${unsupportedTopLevelKeys.join(', ')}.`)
+      }
+
+      if (Array.isArray(parsed.modules)) {
+        const importedModules: string[] = []
+        const seenModules = new Set<string>()
+
+        for (const entry of parsed.modules) {
+          const moduleName = typeof entry === 'string'
+            ? entry
+            : isRecord(entry) && typeof entry.type === 'string'
+              ? entry.type
+              : null
+          const moduleId = getModuleId(moduleName)
+
+          if (!moduleName || !moduleId) {
+            warn('Some module entries were skipped because FetchGUI does not recognize them.')
+            continue
+          }
+
+          if (isRecord(entry) && Object.keys(entry).some((key) => key !== 'type')) {
+            warn('Custom per-module options are not editable yet and may be lost on export.')
+          }
+
+          if (seenModules.has(moduleId)) {
+            warn('Duplicate modules were collapsed because FetchGUI currently supports one entry per module.')
+            continue
+          }
+
+          seenModules.add(moduleId)
+          importedModules.push(moduleId)
+        }
+
+        setEnabledModules(importedModules)
+      } else {
+        warn('No modules array was found, so the current module selection was kept.')
+      }
+
+      if ('display' in parsed && !isRecord(parsed.display)) {
+        warn('The display settings were not an object, so they were not imported.')
+      } else if (isRecord(parsed.display)) {
+        const display = parsed.display
+
+        if ('separator' in display) {
+          if (typeof display.separator === 'string') setSeparator(display.separator)
+          else warn('The display separator was not a string and was ignored.')
+        }
+
+        if ('key' in display) {
+          if (isRecord(display.key)) {
+            if ('width' in display.key) {
+              if (typeof display.key.width === 'number' && Number.isFinite(display.key.width)) {
+                const importedWidth = Math.round(display.key.width)
+                const supportedWidth = Math.min(20, Math.max(8, importedWidth))
+                setKeyWidth(supportedWidth)
+                if (supportedWidth !== importedWidth) {
+                  warn('The key width was adjusted to FetchGUI’s supported range of 8–20 characters.')
+                }
+              } else {
+                warn('The display key width was invalid and was ignored.')
+              }
+            }
+            if (Object.keys(display.key).some((key) => key !== 'width')) {
+              warn('Other display key settings are not editable yet and may be lost on export.')
+            }
+          } else {
+            warn('The display key settings were not an object and were ignored.')
+          }
+        }
+
+        if ('color' in display) {
+          if (isRecord(display.color)) {
+            if ('keys' in display.color) {
+              const importedColor = typeof display.color.keys === 'string'
+                ? display.color.keys.trim().toLowerCase()
+                : ''
+              if (colors.includes(importedColor)) setKeyColor(importedColor)
+              else warn('The key color is not one of FetchGUI’s current named colors, so the existing color was kept.')
+            }
+            if (Object.keys(display.color).some((key) => key !== 'keys')) {
+              warn('Other display color settings are not editable yet and may be lost on export.')
+            }
+          } else {
+            warn('The display color settings were not an object and were ignored.')
+          }
+        }
+
+        if (Object.keys(display).some((key) => !['separator', 'key', 'color'].includes(key))) {
+          warn('Other display settings are not editable yet and may be lost on export.')
+        }
+      }
+
+      if ('logo' in parsed) {
+        const logo = parsed.logo
+
+        if (logo === null || logo === false) {
+          setLogoEnabled(false)
+        } else if (logo === true) {
+          setLogoEnabled(true)
+          warn('The logo is enabled, but its source was not specified; the current source was kept.')
+        } else if (typeof logo === 'string') {
+          const source = getLogoSource(logo)
+          if (source) {
+            setLogoEnabled(true)
+            setLogoSource(source)
+          } else {
+            warn('The logo source is not available in FetchGUI’s current selector, so the current source was kept.')
+          }
+        } else if (isRecord(logo)) {
+          const logoType = typeof logo.type === 'string' ? logo.type.toLowerCase() : ''
+          const source = getLogoSource(logo.source)
+
+          if (logoType === 'none' || logoType === 'disabled') {
+            setLogoEnabled(false)
+          } else if (logoType === 'auto' || source === 'auto') {
+            setLogoEnabled(true)
+            setLogoSource('auto')
+          } else if (source) {
+            setLogoEnabled(true)
+            setLogoSource(source)
+          } else {
+            warn('The logo source or type is not supported by FetchGUI; the current logo settings were kept.')
+          }
+
+          const extraLogoKeys = Object.keys(logo).filter((key) => !['type', 'source', 'padding'].includes(key))
+          if (extraLogoKeys.length > 0) {
+            warn(`Other logo settings won't be preserved: ${extraLogoKeys.join(', ')}.`)
+          }
+
+          if ('padding' in logo) {
+            const padding = logo.padding
+            const isDefaultPadding = isRecord(padding)
+              && Object.keys(padding).length === 1
+              && padding.right === 2
+            if (!isDefaultPadding) warn('Custom logo padding is not editable yet and will be replaced on export.')
+          }
+        } else {
+          warn('The logo setting has an unsupported format and was ignored.')
+        }
+      }
+
+      setActivePreset(null)
+
+      if (warnings.length === 0) {
+        setImportFeedback({ type: 'success', message: `Imported "${file.name}" successfully.` })
+      } else {
+        const summary = warnings.slice(0, 2).join(' ')
+        const remaining = warnings.length > 2
+          ? ` ${warnings.length - 2} more note${warnings.length - 2 === 1 ? '' : 's'} omitted.`
+          : ''
+        setImportFeedback({
+          type: 'warning',
+          message: `Imported "${file.name}" with ${warnings.length} note${warnings.length === 1 ? '' : 's'}. ${summary}${remaining}`,
+        })
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.'
+      setImportFeedback({ type: 'error', message: `Could not import "${file.name}": ${message}` })
+    } finally {
+      input.value = ''
+    }
+  }
+
   const visibleGroups: ModuleInfo['group'][] = ['System', 'Hardware', 'Session']
 
   return (
@@ -167,7 +499,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark"><Terminal size={20} strokeWidth={2.2} /></div>
-          <div><div className="brand-name">fetch<span>lab</span></div><div className="brand-caption">FASTFETCH STUDIO</div></div>
+          <div><div className="brand-name">fetch<span>GUI</span></div><div className="brand-caption">FASTFETCH CONFIG</div></div>
         </div>
         <div className="sidebar-rule" />
         <div className="nav-label">WORKSPACE</div>
@@ -175,11 +507,7 @@ function App() {
         <button className="nav-item" onClick={() => document.getElementById('presets')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><WandSparkles size={17} /><span>Presets</span></button>
         <a className="nav-item nav-link" href="https://github.com/fastfetch-cli/fastfetch/wiki/Configuration" target="_blank" rel="noreferrer"><CircleHelp size={17} /><span>Fastfetch docs</span></a>
         <div className="sidebar-bottom">
-          <div className="sidebar-note-icon"><Code2 size={16} /></div>
-          <div className="sidebar-note-title">Made for your terminal.</div>
-          <p>Build it here. Run it anywhere.</p>
           <a href="https://github.com/fastfetch-cli/fastfetch" target="_blank" rel="noreferrer" className="github-link"><Github size={14} /> Fastfetch on GitHub <span>↗</span></a>
-          <div className="version-line"><span className="status-dot" /> MVP preview <span>v0.1.0</span></div>
         </div>
       </aside>
 
@@ -188,29 +516,55 @@ function App() {
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>Config builder</strong></div>
           <div className="topbar-actions">
             <span className="save-status"><span className="status-dot" /> All changes local</span>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,.jsonc,application/json"
+              hidden
+              onChange={handleConfigImport}
+              aria-label="Choose a Fastfetch configuration file"
+            />
+            <button
+              className="button button-quiet"
+              type="button"
+              onClick={() => {
+                setImportFeedback(null)
+                importInputRef.current?.click()
+              }}
+            >
+              <Upload size={15} /> Import config
+            </button>
             <button className="button button-quiet" onClick={resetAll}><RotateCcw size={15} /> Reset</button>
             <button className="button button-primary" onClick={downloadConfig}><Download size={16} /> Export config</button>
           </div>
         </header>
 
+        {importFeedback && (
+          <div
+            className={`import-feedback import-feedback-${importFeedback.type}`}
+            role={importFeedback.type === 'error' ? 'alert' : 'status'}
+            aria-live={importFeedback.type === 'error' ? 'assertive' : 'polite'}
+          >
+            {importFeedback.message}
+          </div>
+        )}
+
         <section className="page-heading">
           <div>
-            <div className="eyebrow"><span className="eyebrow-line" /> THE CONFIG PLAYGROUND</div>
-            <h1>Your system.<br className="mobile-break" /> <span>Your style.</span></h1>
-            <p className="heading-description">Build a Fastfetch setup that feels like yours. Tweak the details and watch the preview respond.</p>
+            <h1>Fastfetch config editor</h1>
+            <p className="heading-description">Edit modules and display options, then export <code>config.jsonc</code>.</p>
           </div>
-          <div className="heading-orbit" aria-hidden="true"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core"><Terminal size={29} /></div><span className="orbit-star star-one">✳</span><span className="orbit-star star-two">·</span></div>
         </section>
 
         <div className="workspace-grid">
           <section className="panel builder-panel">
             <div className="panel-heading">
-              <div className="panel-title-group"><div className="panel-icon"><Palette size={17} /></div><div><h2>Customize</h2><p>Fine-tune the output</p></div></div>
+              <div className="panel-title-group"><div className="panel-icon"><Palette size={17} /></div><div><h2>Settings</h2></div></div>
               <span className="control-count">{enabledModules.length} modules</span>
             </div>
 
             <div className="control-section">
-              <div className="section-heading"><span className="section-number">01</span><div><h3>Logo & identity</h3><p>Give your terminal a signature</p></div></div>
+              <div className="section-heading"><span className="section-number">01</span><div><h3>Logo</h3><p>Select the logo source</p></div></div>
               <div className="setting-row logo-row">
                 <div className="setting-copy"><span className="setting-label">Show logo</span><span className="setting-hint">Built-in distro artwork</span></div>
                 <button className={`toggle ${logoEnabled ? 'on' : ''}`} role="switch" aria-checked={logoEnabled} aria-label="Show logo" onClick={() => setLogoEnabled((value) => !value)}><span /></button>
@@ -220,13 +574,13 @@ function App() {
             </div>
 
             <div className="control-section">
-              <div className="section-heading"><span className="section-number">02</span><div><h3>Display & color</h3><p>Dial in the small details</p></div></div>
+              <div className="section-heading"><span className="section-number">02</span><div><h3>Display & color</h3><p>Labels and spacing</p></div></div>
               <div className="setting-row"><div className="setting-copy"><span className="setting-label">Key color</span><span className="setting-hint">Labels beside each value</span></div><div className="color-options" role="group" aria-label="Key color">{colors.map((color) => <button key={color} className={`color-swatch ${keyColor === color ? 'selected' : ''}`} style={{ '--swatch': cssColors[color] } as React.CSSProperties} title={color} aria-label={`${color} key color`} aria-pressed={keyColor === color} onClick={() => setKeyColor(color)}>{keyColor === color && <Check size={12} />}</button>)}</div></div>
               <div className="two-fields"><div><label className="field-label" htmlFor="separator">Value separator</label><input id="separator" maxLength={6} value={separator} onChange={(event) => setSeparator(event.target.value)} placeholder=": " /></div><div><label className="field-label" htmlFor="key-width">Key width <span>{keyWidth} ch</span></label><input id="key-width" type="range" min="8" max="20" value={keyWidth} onChange={(event) => setKeyWidth(Number(event.target.value))} /></div></div>
             </div>
 
             <div className="control-section module-section">
-              <div className="section-heading module-section-heading"><span className="section-number">03</span><div><h3>System modules</h3><p>Choose what makes the cut</p></div></div>
+              <div className="section-heading module-section-heading"><span className="section-number">03</span><div><h3>Modules</h3><p>Toggle and reorder modules</p></div></div>
               {visibleGroups.map((group) => {
                 const groupItems = moduleCatalog.filter((item) => item.group === group)
                 const isExpanded = expandedGroups[group]
@@ -251,11 +605,11 @@ function App() {
           <div className="right-column">
             <section className="panel preview-panel">
               <div className="panel-heading preview-heading">
-                <div className="panel-title-group"><div className="panel-icon preview-icon"><Eye size={17} /></div><div><h2>Live preview</h2><p>Your output, taking shape</p></div></div>
+                <div className="panel-title-group"><div className="panel-icon preview-icon"><Eye size={17} /></div><div><h2>Preview</h2><p>Sample output</p></div></div>
                 <span className="live-pill"><span /> LIVE</span>
               </div>
               <div className="terminal-window">
-                <div className="terminal-titlebar"><div className="window-dots"><i /><i /><i /></div><div className="terminal-tab"><Terminal size={12} /> fetchlab <span>—</span> fish</div><div className="terminal-menu">•••</div></div>
+                <div className="terminal-titlebar"><div className="window-dots"><i /><i /><i /></div><div className="terminal-tab"><Terminal size={12} /> fetchGUI <span>—</span> fish</div><div className="terminal-menu">•••</div></div>
                 <div className="terminal-body">
                   {logoEnabled && <pre className="logo-art" style={{ color: cssColors[keyColor] }}>{logoArt.join('\n')}</pre>}
                   <div className={`terminal-output ${!logoEnabled ? 'no-logo' : ''}`}>
@@ -285,10 +639,9 @@ function App() {
             </section>
 
             <section className="preset-panel" id="presets">
-              <div className="preset-heading"><div><span className="eyebrow preset-eyebrow">QUICK START</span><h2>Pick a starting point</h2></div><span className="preset-caption">Change it all afterward.</span></div>
+              <div className="preset-heading"><div><h2>Presets</h2></div></div>
               <div className="preset-grid">{(Object.keys(presets) as PresetKey[]).map((key, index) => <button key={key} className={`preset-card ${activePreset === key ? 'preset-selected' : ''}`} onClick={() => applyPreset(key)}><div className={`preset-art preset-art-${key}`} aria-hidden="true">{index === 0 ? <><span>OS</span><span>CPU</span><span>MEM</span><span>GPU</span></> : index === 1 ? <><span>OS</span><span>CPU</span><span>MEM</span></> : <><span>OS</span><span>HOST</span><span>KERNEL</span><span>CPU</span><span>GPU</span><span>MEM</span></>}</div><div className="preset-card-copy"><span className="preset-name">{presets[key].label}{activePreset === key && <Check size={12} />}</span><small>{presets[key].description}</small></div></button>)}</div>
             </section>
-            <footer className="page-footer"><span>FetchLab <span>·</span> An open-source-minded side project</span><span>Built for terminal people <span>♥</span></span></footer>
           </div>
         </div>
       </main>
